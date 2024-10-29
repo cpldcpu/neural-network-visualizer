@@ -12,7 +12,8 @@ export default defineConfig(({ command, mode }) => {
       plugins: [react(), Pages()],
       base: base,
       build: {
-        outDir: isGitHubPages ? 'dist-github' : 'dist'
+        outDir: isGitHubPages ? 'dist-github' : 'dist',
+        sourcemap: true,
       },
       resolve: {
         alias: {
