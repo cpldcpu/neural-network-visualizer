@@ -6,8 +6,10 @@ import getRepoName from "git-repo-name";
 
 export default defineConfig(({ command, mode }) => {
     const isGitHubPages = mode === 'github-pages'
-    const base = isGitHubPages ? `/${getRepoName.sync()}/` : '/'
-  
+
+  // Set the base path manually
+    const base = isGitHubPages ? `/neural-network-visualizer/` : '/';
+
     return {
       plugins: [react(), Pages()],
       base: base,
