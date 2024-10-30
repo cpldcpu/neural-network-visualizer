@@ -71,6 +71,7 @@ const forwardPass = (input: number[], weights: any): any => {
 
   // First block
   const norm1 = layerNorm(centeredInput);
+  // const norm1 = layerNorm(input);
   const linear1 = matrixVectorProduct(weights.hidden1, norm1);
   const act1 = linear1.map(relu);
   
@@ -226,7 +227,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
     const getLayerActivations = (layerIndex: number): number[] => {
       if (!layerActivations) return new Array(layers[layerIndex]).fill(0);
       switch(layerIndex) {
-        case 0: return activations || new Array(64).fill(0);
+        case 0: return centerInputPattern(activations || new Array(64).fill(0)); // Use centered input pattern
         case 1: return layerActivations.hidden1;
         case 2: return layerActivations.hidden2;
         default: return [];
@@ -299,7 +300,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
         // Get activation value for this neuron
         let activation = 0;
         if (layerIndex === 0) {
-          activation = activations ? activations[i] : 0;
+          activation = centerInputPattern(activations || new Array(64).fill(0))[i]; // Use centered input pattern
         } else if (layerActivations) {
           const layerName = layerIndex === 1 ? 'hidden1' : 
                            layerIndex === 2 ? 'hidden2' : 'output';
@@ -573,7 +574,7 @@ const DrawingCanvas = () => {
             0 0 10px #FF9E0066,
             0 0 20px #FF9E0044,
             0 0 30px #FF9E0022,
-            2px 2px 2px rgba(0, 0, 0, 0.5)
+             2px 2px 2px rgba(0, 0, 0, 0.5)
           `
         }}
       >
