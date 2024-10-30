@@ -2,7 +2,7 @@
 
 Online version **[here](https://cpldcpu.github.io/neural-network-visualizer/)**.
 
-This is a simple neural network visualizer. It began as a Claude Artifact and was completed with the "Copilot Edits" interface, released only yesterday. Very few lines were written by hand, showcasing the advances in GenAI up to today (2024-Nov-30). Compare this to the early days of LLMs when they struggled to [synthesize a simple CPU in HDL](https://github.com/cpldcpu/LLM_HDL_Design).
+This is a simple neural network visualizer. It began as a Claude Artifact and was completed with the "Copilot Edits" interface, which was released only yesterday. Very few lines were written by hand, showcasing the advances in GenAI up to today (2024-Nov-30). Compare this to the early days of LLMs when they struggled to [synthesize a simple CPU in HDL](https://github.com/cpldcpu/LLM_HDL_Design).
 
 ## Features
 
