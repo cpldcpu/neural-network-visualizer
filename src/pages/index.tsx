@@ -65,12 +65,12 @@ const centerInputPattern = (input: number[]): number[] => {
   return centeredInput;
 };
 
-const forwardPass = (input: number[], weights: any): any => {
-  // Center the input pattern
-  const centeredInput = centerInputPattern(input);
-
+// Modify the forwardPass function to accept centerInput as a parameter:
+const forwardPass = (input: number[], weights: any, centerInput: boolean): any => {
+  const processedInput = centerInput ? centerInputPattern(input) : input;
+  
   // First block
-  const norm1 = layerNorm(centeredInput);
+  const norm1 = layerNorm(processedInput);
   // const norm1 = layerNorm(input);
   const linear1 = matrixVectorProduct(weights.hidden1, norm1);
   const act1 = linear1.map(relu);
@@ -178,7 +178,15 @@ const validateWeights = (weights: any): boolean => {
   return true;
 };
 
-const NetworkViz = ({ activations, config }: { activations: number[], config: any }) => {
+const NetworkViz = (
+  { activations, config, centerInput, setCenterInput }: 
+  { 
+    activations: number[], 
+    config: any, 
+    centerInput: boolean, 
+    setCenterInput: React.Dispatch<React.SetStateAction<boolean>> 
+  }
+) => {
   const [weightThreshold, setWeightThreshold] = useState(50);
   const [weights, setWeights] = useState(config.weights);
   const [classLabels, setClassLabels] = useState(Array(config.weights.output.length).fill("?"));
@@ -192,9 +200,9 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
   
   useEffect(() => {
     if (activations) {
-      setLayerActivations(forwardPass(activations, weights));
+      setLayerActivations(forwardPass(activations, weights, centerInput));
     }
-  }, [activations, weights]);
+  }, [activations, weights, centerInput]);
 
   const getLayerPositions = (layerSize: number, layerIndex: number, totalLayers: number): { x: number, y: number }[] => {
     const width = 900;  // Increased by 50%
@@ -227,7 +235,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
     const getLayerActivations = (layerIndex: number): number[] => {
       if (!layerActivations) return new Array(layers[layerIndex]).fill(0);
       switch(layerIndex) {
-        case 0: return centerInputPattern(activations || new Array(64).fill(0)); // Use centered input pattern
+        case 0: return centerInput ? centerInputPattern(activations || new Array(64).fill(0)) : (activations || new Array(64).fill(0));
         case 1: return layerActivations.hidden1;
         case 2: return layerActivations.hidden2;
         default: return [];
@@ -300,7 +308,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
         // Get activation value for this neuron
         let activation = 0;
         if (layerIndex === 0) {
-          activation = centerInputPattern(activations || new Array(64).fill(0))[i]; // Use centered input pattern
+          activation = centerInput ? centerInputPattern(activations || new Array(64).fill(0))[i] : (activations || new Array(64).fill(0))[i];
         } else if (layerActivations) {
           const layerName = layerIndex === 1 ? 'hidden1' : 
                            layerIndex === 2 ? 'hidden2' : 'output';
@@ -411,7 +419,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
           {renderNeurons()}
         </svg>
       </div>
-      <div className="w-64 mt-4">
+      <div className="w-full mt-4 flex items-center gap-4 flex-nowrap">
         <label className="text-sm text-gray-300">Connection Threshold: {weightThreshold}%</label>
         <Slider
           value={[weightThreshold]}
@@ -419,8 +427,16 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
           min={0}
           max={100}
           step={1}
-          className="mt-1"
+          className="mt-1 flex-1"
         />
+        <label className="text-sm text-gray-300 flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            checked={centerInput} 
+            onChange={() => setCenterInput(!centerInput)} 
+          />
+          Center Input
+        </label>
       </div>
     </div>
   );
@@ -436,6 +452,7 @@ const DrawingCanvas = () => {
     description: ""
   });
   const [errorMessage, setErrorMessage] = useState("");
+  const [centerInput, setCenterInput] = useState(true);
   const CANVAS_SIZE = 256;
   const GRID_SIZE = 8;
   const PIXEL_SIZE = CANVAS_SIZE / GRID_SIZE;
@@ -630,6 +647,8 @@ const DrawingCanvas = () => {
       <NetworkViz 
         activations={pixelData} 
         config={networkConfig}
+        centerInput={centerInput}
+        setCenterInput={setCenterInput}
       />
     </div>
   );
