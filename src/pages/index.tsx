@@ -5,7 +5,7 @@ const ARCHITECTURE = {
   input: 64,
   hidden1: 10,
   hidden2: 10,
-  output: 4
+  output: 4 // Default value
 };
 
 // Helper to multiply matrix and vector
@@ -33,9 +33,44 @@ const layerNorm = (vector: number[]): number[] => {
   return vector.map(x => (x - mean) / std);
 };
 
+// Center the input pattern
+const centerInputPattern = (input: number[]): number[] => {
+  const gridSize = Math.sqrt(input.length);
+  const nonZeroIndices = input
+    .map((value, index) => (value > 0 ? index : -1))
+    .filter(index => index !== -1);
+
+  if (nonZeroIndices.length === 0) return input;
+
+  const xCoords = nonZeroIndices.map(index => index % gridSize);
+  const yCoords = nonZeroIndices.map(index => Math.floor(index / gridSize));
+
+  const xCenter = (Math.min(...xCoords) + Math.max(...xCoords)) / 2;
+  const yCenter = (Math.min(...yCoords) + Math.max(...yCoords)) / 2;
+
+  const xOffset = Math.floor(gridSize / 2) - Math.round(xCenter);
+  const yOffset = Math.floor(gridSize / 2) - Math.round(yCenter);
+
+  const centeredInput = new Array(input.length).fill(0);
+  nonZeroIndices.forEach(index => {
+    const x = index % gridSize;
+    const y = Math.floor(index / gridSize);
+    const newX = x + xOffset;
+    const newY = y + yOffset;
+    if (newX >= 0 && newX < gridSize && newY >= 0 && newY < gridSize) {
+      centeredInput[newY * gridSize + newX] = input[index];
+    }
+  });
+
+  return centeredInput;
+};
+
 const forwardPass = (input: number[], weights: any): any => {
+  // Center the input pattern
+  const centeredInput = centerInputPattern(input);
+
   // First block
-  const norm1 = layerNorm(input);
+  const norm1 = layerNorm(centeredInput);
   const linear1 = matrixVectorProduct(weights.hidden1, norm1);
   const act1 = linear1.map(relu);
   
@@ -122,7 +157,7 @@ const validateWeights = (weights: any): boolean => {
     if (weights.hidden2.length !== ARCHITECTURE.hidden2) return false;
     if (weights.hidden2[0].length !== ARCHITECTURE.hidden1) return false;
     
-    if (weights.output.length !== ARCHITECTURE.output) return false;
+    if (weights.output.length > 10 || weights.output.length < 1) return false; // Ensure output neurons are between 1 and 10
     if (weights.output[0].length !== ARCHITECTURE.hidden2) return false;
     
     // Check if all values are numbers
@@ -132,7 +167,7 @@ const validateWeights = (weights: any): boolean => {
     }
 
     // Classes array is optional
-    if (weights.classes && (!Array.isArray(weights.classes) || weights.classes.length !== ARCHITECTURE.output)) {
+    if (weights.classes && (!Array.isArray(weights.classes) || weights.classes.length !== weights.output.length)) {
       return false;
     }
   } catch (e) {
@@ -145,13 +180,13 @@ const validateWeights = (weights: any): boolean => {
 const NetworkViz = ({ activations, config }: { activations: number[], config: any }) => {
   const [weightThreshold, setWeightThreshold] = useState(50);
   const [weights, setWeights] = useState(config.weights);
-  const [classLabels, setClassLabels] = useState(Array(ARCHITECTURE.output).fill("?"));
+  const [classLabels, setClassLabels] = useState(Array(config.weights.output.length).fill("?"));
   const [layerActivations, setLayerActivations] = useState<{ hidden1: number[], hidden2: number[], output: number[] } | null>(null);
 
   // Update weights and class labels when config changes
   useEffect(() => {
     setWeights(config.weights);
-    setClassLabels(config.classes || Array(ARCHITECTURE.output).fill("?"));
+    setClassLabels(config.classes || Array(config.weights.output.length).fill("?"));
   }, [config]);
   
   useEffect(() => {
@@ -182,7 +217,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
   };
 
   const renderConnections = () => {
-    const layers = [ARCHITECTURE.input, ARCHITECTURE.hidden1, ARCHITECTURE.hidden2, ARCHITECTURE.output];
+    const layers = [ARCHITECTURE.input, ARCHITECTURE.hidden1, ARCHITECTURE.hidden2, weights.output.length];
     const allPositions = layers.map((size, i) => getLayerPositions(size, i, layers.length));
     const connections: JSX.Element[] = [];
     let connectionId = 0;
@@ -254,7 +289,7 @@ const NetworkViz = ({ activations, config }: { activations: number[], config: an
   };
 
   const renderNeurons = () => {
-    const layers = [ARCHITECTURE.input, ARCHITECTURE.hidden1, ARCHITECTURE.hidden2, ARCHITECTURE.output];
+    const layers = [ARCHITECTURE.input, ARCHITECTURE.hidden1, ARCHITECTURE.hidden2, weights.output.length];
     const neurons: JSX.Element[] = [];
     let neuronId = 0;
 
@@ -437,11 +472,11 @@ const DrawingCanvas = () => {
         }
 
         // Only use provided classes if they exist and have the correct length
-        const validClasses = Array.isArray(classes) && classes.length === ARCHITECTURE.output;
+        const validClasses = Array.isArray(classes) && classes.length === weights.output.length;
 
         setNetworkConfig({
           weights,
-          classes: validClasses ? classes : Array(ARCHITECTURE.output).fill("?"),
+          classes: validClasses ? classes : Array(weights.output.length).fill("?"),
           description: description || ""
         });
       } catch (error) {
