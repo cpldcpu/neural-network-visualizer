@@ -24,7 +24,7 @@ Draw a digit on the 8x8 pixel canvas and watch the neuron activations propagate 
 
 ## Neural Network and Training
 
-The training code (Python) can be found in the `train` directory. The training run is configured directly in the `trainmnist.py` script. 
+The training code (Python) can be found in the `train` directory. The training run is configured directly in the `trainmnist.py` script. After completing the training run, the weights are saved to a JSON file. The JSON file can be loaded into the visualizer using the `Load weights` button.
 
 ```python
 
