@@ -1,98 +1,57 @@
-# 🚀 Vite + TS + Tailwind + shadcn/ui Template
+# A Neural Network Visualizer
 
-## What's this?
+Online version **[here](https://cpldcpu.github.io/neural-network-visualizer/)**.
 
-A no-nonsense template for when you need to slap a Claude-generated UI somewhere that isn't a chat window.
+This is a simple neural network visualizer. It began its life as a Claude Artifact and was completed with the "Copilot Edits" interface, which was released only yesterday. Very few lines were written by hand, which is a great testament to the advances in GenAI up to today (2024-Nov-30). Compare this to the beginnings of LLMs when they struggled to [synthesize a simple CPU in HDL](https://github.com/cpldcpu/LLM_HDL_Design). 
 
-Uses the exact same UI stack as [Claude Artifacts](https://support.anthropic.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them), for copy-pasting:
+What is special about it? It looks nice and provides an intuitive way of visualizing the power of even very simple multi-layer perceptrons. You can draw an 8x8 pixel image, while the connections and neuron activations are updated in real time. 
 
-- [Vite](https://vitejs.dev) for speed
-- TypeScript for sanity
-- [Tailwind](https://tailwindcss.com) for style
-- [shadcn/ui](https://ui.shadcn.com) for pretty buttons
-- File-based routing because ain't nobody got time for that
-- My personal Tailwind color scheme and font choices, because I have opinions
+The network model is a simple multi-layer perceptron with 64 input neurons (8x8), two hidden layers with 10 neurons each, and between 4 and 10 output neurons. Four models are provided that are trained on different subsets of the MNIST dataset. 
+`model3` is a binary network (BitNet) that is trained using Quantization Aware Training (QAT).
 
-## Why use it?
+[![NN Visualizer](screenshot.png)](https://cpldcpu.github.io/neural-network-visualizer/)
 
-Because you're tired of setting up the same stack for the 100th time. This template is for the "I just want it to work" crowd.
+## How to Use
 
-## Quick Start
+Draw a digit on the 8x8 pixel canvas and watch how the neuron activations propagate through the network. The network is updated in real time as you draw. The thickness of the lines between the neurons indicates the product of weight and activation. Blue lines indicate positive weights, and red lines indicate negative weights. A fuel gauge next to each neuron indicates the activation level.
 
-1. Use this template:
+'Clear' clears the canvas. The model selector allows you to pick one of four models. 'Load weights' allows you to load custom models in JSON format.
 
-   - Click the "Use this template" button on GitHub
-   - Choose "Create a new repository"
-   - Give it a snazzy name and hit "Create repository from template"
+The 'Connection threshold' slider allows you to adjust the threshold for displaying connections, limiting the display to only the most salient connections. 
 
-2. Clone your new repo:
+'Center input' toggles automatic centering of the input image. Centering improves the accuracy of the network as the MNIST dataset consists of centered images, and the inductive properties of the MLP architecture are rather limited otherwise.
 
-   ```
-   git clone https://github.com/yourusername/your-snazzy-new-repo.git
-   cd your-snazzy-new-repo
-   ```
+## Neural Network and Training
 
-3. Install dependencies (go grab a coffee, it'll take a minute):
+The training code (python) can be found in the `train` directory. The training run is configured directly in the `trainmnist.py` script. 
 
-   ```
-   npm install
-   ```
+```python
 
-4. Run it:
+classes     = [0,1,2,3,4,5,6,7,8,9]   # selection of classes to use for the output neurons
+QuantType   = 'None'                  # Quantization type: 'None' or 'Binary'
+filename    = 'weights_full_10c_noaug.json'   # file to save the weights to
+Name        = 'Detects All Number\nFull Precision, No Augmentation\n'   # description of the model
+``` 
 
-   ```
-   npm run dev
-   ```
-
-5. Add a page:
-
-   - Throw a new `.tsx` file in `src/pages`
-   - Magic! It's now a route. (Thanks, [vite-plugin-pages](https://github.com/hannoeru/vite-plugin-pages))
-
-6. Build for production:
-
-   ```
-   npm run build
-   ```
-
-7. Deploy:
-   - Take the `dist` folder
-   - Throw it at a static host (Nginx, Netlify, whatever floats your boat)
-   - Profit!
-
-## "But how do I...?"
-
-- Customize theme? `tailwind.config.js` is your friend. (But my color choices are pretty rad, just saying.)
-- Add shadcn/ui components? `npx shadcn-ui add <component-name>`. Done.
-- Need more? Check out the [Vite docs](https://vitejs.dev/), [Tailwind docs](https://tailwindcss.com/docs), or [shadcn/ui docs](https://ui.shadcn.com/).
-
-## Deployment
-
-This template comes with an easy GitHub Pages deployment setup.
-
-1. Push your changes to GitHub.
-
-2. Run the deployment command:
+The model structure is shown below. A layer normalization is applied to the input of every layer, which greatly improves the training stability. The `elementwise_affine` parameter is set to `False` to reduce the number of parameters. Likewise, no bias is used in the linear layers.  'BitLinear' is a custom linear layer for quantization-aware training, for QuantType='None' it is a standard linear layer.
 
 ```
-npm run deploy
+Sequential(
+  (0): LayerNorm((64,), eps=1e-05, elementwise_affine=False)
+  (1): BitLinear(in_features=64, out_features=10, bias=False)
+  (2): ReLU()
+  (3): LayerNorm((10,), eps=1e-05, elementwise_affine=False)
+  (4): BitLinear(in_features=10, out_features=10, bias=False)
+  (5): ReLU()
+  (6): LayerNorm((10,), eps=1e-05, elementwise_affine=False)
+  (7): BitLinear(in_features=10, out_features=10, bias=False)
+)
 ```
 
-3. Set up GitHub Pages:
+## Building
 
-- Go to your repository settings
-- Navigate to Pages
-- Set the source to "gh-pages" branch
-- Save
+The core code can be found in [`webcode/src/pages/index.tsx`](webcode/src/pages/index.tsx) and was initially generated as a *Claude-3.5-Sonnet (New)* artifact based on React. It turned out that exporting artifacts from claude is a major pain, especially once the artifact reaches that magical length where claude starts to get limited by context length and the output quality degrades.
 
-Your site will be live at `https://yourusername.github.io/your-repo-name/`
+Luckily, I found the [Claude Artifacts Starter](https://github.com/EndlessReform/claude-artifacts-starter) which was a great help in providing an environment that allowed to deploy the artifact to a github.io page.
 
-Note: This setup uses HashRouter, which works out of the box with GitHub Pages. No additional configuration is needed for routing to work correctly.
-
-## Credits
-
-- UI components lovingly generated by Claude, Anthropic's AI assistant. (No, it can't do your laundry. We asked.)
-- Template crafted by [Your Name] with only minimal cursing.
-- Comes with a personal touch of color and typography. You're welcome.
-
-Now go build something cool. Or don't. I'm a README, not a cop.
+All web code is in the `webcode` directory. Read Claude Artifacts Starter's [README](webcode/README.md) for more information.
