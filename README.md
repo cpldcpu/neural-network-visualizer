@@ -1,29 +1,30 @@
-# A Neural Network Visualizer
+# Neural Network Visualizer
 
 Online version **[here](https://cpldcpu.github.io/neural-network-visualizer/)**.
 
-This is a simple neural network visualizer. It began its life as a Claude Artifact and was completed with the "Copilot Edits" interface, which was released only yesterday. Very few lines were written by hand, which is a great testament to the advances in GenAI up to today (2024-Nov-30). Compare this to the beginnings of LLMs when they struggled to [synthesize a simple CPU in HDL](https://github.com/cpldcpu/LLM_HDL_Design). 
+This is a simple neural network visualizer. It began as a Claude Artifact and was completed with the "Copilot Edits" interface, released only yesterday. Very few lines were written by hand, showcasing the advances in GenAI up to today (2024-Nov-30). Compare this to the early days of LLMs when they struggled to [synthesize a simple CPU in HDL](https://github.com/cpldcpu/LLM_HDL_Design).
 
-What is special about it? It looks nice and provides an intuitive way of visualizing the power of even very simple multi-layer perceptrons. You can draw an 8x8 pixel image, while the connections and neuron activations are updated in real time. 
+## Features
 
-The network model is a simple multi-layer perceptron with 64 input neurons (8x8), two hidden layers with 10 neurons each, and between 4 and 10 output neurons. Four models are provided that are trained on different subsets of the MNIST dataset. 
-`model3` is a binary network (BitNet) that is trained using Quantization Aware Training (QAT).
+Why is it special? This app provides an intuitive way to visualize the power of simple multi-layer perceptrons. You can draw an 8x8 pixel image, and the connections and neuron activations update in real time.
+
+The network model is a simple multi-layer perceptron with 64 input neurons (8x8), two hidden layers with 10 neurons each, and between 4 and 10 output neurons. Four models are provided, trained on different subsets of the MNIST dataset. `model3` is a binary network (BitNet) trained using Quantization Aware Training (QAT).
 
 [![NN Visualizer](screenshot.png)](https://cpldcpu.github.io/neural-network-visualizer/)
 
 ## How to Use
 
-Draw a digit on the 8x8 pixel canvas and watch how the neuron activations propagate through the network. The network is updated in real time as you draw. The thickness of the lines between the neurons indicates the product of weight and activation. Blue lines indicate positive weights, and red lines indicate negative weights. A fuel gauge next to each neuron indicates the activation level.
+Draw a digit on the 8x8 pixel canvas and watch the neuron activations propagate through the network in real time. The thickness of the lines between neurons indicates the product of weight and activation. Blue lines indicate positive weights, and red lines indicate negative weights. A fuel gauge next to each neuron indicates the activation level.
 
-'Clear' clears the canvas. The model selector allows you to pick one of four models. 'Load weights' allows you to load custom models in JSON format.
-
-The 'Connection threshold' slider allows you to adjust the threshold for displaying connections, limiting the display to only the most salient connections. 
-
-'Center input' toggles automatic centering of the input image. Centering improves the accuracy of the network as the MNIST dataset consists of centered images, and the inductive properties of the MLP architecture are rather limited otherwise.
+- `Clear`: Clears the canvas.
+- `Model selector`: Pick one of four models.
+- `Load weights`: Load custom models in JSON format.
+- The `Connection threshold` slider: Adjust the threshold for displaying connections, limiting the display to the most salient connections.
+- `Center input`: Toggles automatic centering of the input image. Centering improves network accuracy as the MNIST dataset consists of centered images, and the inductive properties of the MLP architecture are limited otherwise.
 
 ## Neural Network and Training
 
-The training code (python) can be found in the `train` directory. The training run is configured directly in the `trainmnist.py` script. 
+The training code (Python) can be found in the `train` directory. The training run is configured directly in the `trainmnist.py` script. 
 
 ```python
 
