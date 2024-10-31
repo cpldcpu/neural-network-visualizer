@@ -14,7 +14,7 @@ The network model is a simple multi-layer perceptron with 64 input neurons (8x8)
 
 ## How to Use
 
-Draw a digit on the 8x8 pixel canvas and watch the neuron activations propagate through the network in real time. The thickness of the lines between neurons indicates the product of weight and activation. Blue lines indicate positive weights, and red lines indicate negative weights. A fuel gauge next to each neuron indicates the activation level. The predicted class is highlighted in the output layer on the right side. 
+Draw a digit on the 8x8 pixel canvas and watch the neuron activations propagate through the network in real time. The thickness of the lines between neurons indicates the product of weight and activation. Blue lines indicate a positive activation flow, and orange lines negative . A fuel gauge next to each neuron indicates the activation level. The predicted class is highlighted in the output layer on the right side. 
 
 - `Clear`: Clears the canvas.
 - `Model selector`: Pick one of four models.
@@ -34,7 +34,7 @@ filename    = 'weights_full_10c_noaug.json'   # file to save the weights to
 Name        = 'Detects All Number\nFull Precision, No Augmentation\n'   # description of the model
 ``` 
 
-The model structure is shown below. A layer normalization is applied to the input of every layer, which greatly improves the training stability. The `elementwise_affine` parameter is set to `False` to reduce the number of parameters. Likewise, no bias is used in the linear layers.  `BitLinear` is a custom linear layer for quantization-aware training, for `QuantType='None'` it is a standard linear layer.
+The model structure is shown below. A layer normalization is applied to the input of every layer, which greatly improves the training stability and accuracy. The `elementwise_affine` parameter is set to `False` to reduce the number of parameters. Likewise, no bias is used in the linear layers.  `BitLinear` is a custom linear layer for quantization-aware training, for `QuantType='None'` it is a standard linear layer.
 
 ```
 Sequential(
