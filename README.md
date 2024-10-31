@@ -6,7 +6,7 @@ This is a simple neural network visualizer. It began as a Claude Artifact and wa
 
 ## Features
 
-Why is it special? This app provides an intuitive way to visualize the power of simple multi-layer perceptrons. You can draw an 8x8 pixel image, and the connections and neuron activations update in real time.
+Why is it special? This app provides an intuitive way to visualize the power of simple multi-layer perceptrons. You can draw an 8x8 pixel image, and the connections and neuron activations update in real time, propagating through the network from left to right. 
 
 The network model is a simple multi-layer perceptron with 64 input neurons (8x8), two hidden layers with 10 neurons each, and between 4 and 10 output neurons. Four models are provided, trained on different subsets of the MNIST dataset. `model3` is a binary network (BitNet) trained using Quantization Aware Training (QAT).
 
@@ -14,7 +14,7 @@ The network model is a simple multi-layer perceptron with 64 input neurons (8x8)
 
 ## How to Use
 
-Draw a digit on the 8x8 pixel canvas and watch the neuron activations propagate through the network in real time. The thickness of the lines between neurons indicates the product of weight and activation. Blue lines indicate positive weights, and red lines indicate negative weights. A fuel gauge next to each neuron indicates the activation level.
+Draw a digit on the 8x8 pixel canvas and watch the neuron activations propagate through the network in real time. The thickness of the lines between neurons indicates the product of weight and activation. Blue lines indicate positive weights, and red lines indicate negative weights. A fuel gauge next to each neuron indicates the activation level. The predicted class is highlighted in the output layer on the right side. 
 
 - `Clear`: Clears the canvas.
 - `Model selector`: Pick one of four models.
@@ -34,7 +34,7 @@ filename    = 'weights_full_10c_noaug.json'   # file to save the weights to
 Name        = 'Detects All Number\nFull Precision, No Augmentation\n'   # description of the model
 ``` 
 
-The model structure is shown below. A layer normalization is applied to the input of every layer, which greatly improves the training stability. The `elementwise_affine` parameter is set to `False` to reduce the number of parameters. Likewise, no bias is used in the linear layers.  'BitLinear' is a custom linear layer for quantization-aware training, for QuantType='None' it is a standard linear layer.
+The model structure is shown below. A layer normalization is applied to the input of every layer, which greatly improves the training stability. The `elementwise_affine` parameter is set to `False` to reduce the number of parameters. Likewise, no bias is used in the linear layers.  `BitLinear` is a custom linear layer for quantization-aware training, for `QuantType='None'` it is a standard linear layer.
 
 ```
 Sequential(
