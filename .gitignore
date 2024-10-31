@@ -12,7 +12,8 @@ webcode/dist
 webcode/dist-ssr
 webcode/dist-github
 webcode/*.local
-training/data
+
+train/data
 
 # Editor directories and files
 .vscode/*
