@@ -300,13 +300,13 @@ const forwardPass = (input: number[], weights: any, centerInput: boolean): any =
     const norm3 = layerNorm(act2);
     const linear3 = matrixVectorProduct(weights.hidden3, norm3);
     act3 = linear3.map(relu);
-    
-    // Output block
+  
+  // Output block
     const norm4 = layerNorm(act3);
     output = matrixVectorProduct(weights.output, norm4);
   } else {
     // Output block (2 hidden layers)
-    const norm3 = layerNorm(act2);
+  const norm3 = layerNorm(act2);
     output = matrixVectorProduct(weights.output, norm3);
   }
 
@@ -386,7 +386,7 @@ const validateWeights = (weights: any): boolean => {
       if (weights.output[0].length !== ARCHITECTURE.hidden3) return false;
     } else {
       if (weights.output.length > 10 || weights.output.length < 1) return false;
-      if (weights.output[0].length !== ARCHITECTURE.hidden2) return false;
+    if (weights.output[0].length !== ARCHITECTURE.hidden2) return false;
     }
     
     // Check if all values are numbers
@@ -549,7 +549,7 @@ const NetworkViz = (
         drawLayerConnections(allPositions[2], allPositions[3], weights.hidden3, 2);
         drawLayerConnections(allPositions[3], allPositions[4], weights.output, 3);
       } else {
-        drawLayerConnections(allPositions[2], allPositions[3], weights.output, 2);
+      drawLayerConnections(allPositions[2], allPositions[3], weights.output, 2);
       }
     }
 
@@ -768,6 +768,8 @@ const DrawingCanvas = () => {
   const CANVAS_SIZE = 256;
   const GRID_SIZE = canvasSize;
   const PIXEL_SIZE = CANVAS_SIZE / GRID_SIZE;
+  const [brushSize, setBrushSize] = useState(1);
+  const [fullIntensity, setFullIntensity] = useState(false);
 
   // Handle weight upload and add "Custom Model" to the selection list
   const handleWeightUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -874,20 +876,34 @@ const DrawingCanvas = () => {
   }, [GRID_SIZE, PIXEL_SIZE]);
 
   const updatePixelData = (ctx: CanvasRenderingContext2D, x: number, y: number, intensity: number) => {
-    const gridX = Math.floor(x / PIXEL_SIZE);
-    const gridY = Math.floor(y / PIXEL_SIZE);
-    if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-      const index = gridY * GRID_SIZE + gridX;
-      const newPixelData = [...pixelData];
-      newPixelData[index] = Math.min(1, newPixelData[index] + intensity);
-      setPixelData(newPixelData);
-      
-      ctx.fillStyle = `rgba(255, 255, 255, ${newPixelData[index]})`;
-      ctx.fillRect(gridX * PIXEL_SIZE, gridY * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
-      
-      ctx.strokeStyle = '#333333';
-      ctx.strokeRect(gridX * PIXEL_SIZE, gridY * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+    const centerGX = Math.floor(x / PIXEL_SIZE);
+    const centerGY = Math.floor(y / PIXEL_SIZE);
+
+    const newPixelData = [...pixelData];
+
+    // Map brushSize: 1 -> 1x1, 2 -> 3x3, 3 -> 4x4, and so on
+    const boxSize = brushSize === 1 ? 1 : brushSize + 1;
+    const halfSpan = Math.floor((boxSize - 1) / 2);
+    const startGX = centerGX - halfSpan;
+    const startGY = centerGY - halfSpan;
+    const endGX = startGX + boxSize - 1;
+    const endGY = startGY + boxSize - 1;
+
+    for (let gy = startGY; gy <= endGY; gy++) {
+      if (gy < 0 || gy >= GRID_SIZE) continue;
+      for (let gx = startGX; gx <= endGX; gx++) {
+        if (gx < 0 || gx >= GRID_SIZE) continue;
+        const index = gy * GRID_SIZE + gx;
+        newPixelData[index] = fullIntensity ? 1 : Math.min(1, newPixelData[index] + intensity);
+
+        ctx.fillStyle = `rgba(255, 255, 255, ${newPixelData[index]})`;
+        ctx.fillRect(gx * PIXEL_SIZE, gy * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+        ctx.strokeStyle = '#333333';
+        ctx.strokeRect(gx * PIXEL_SIZE, gy * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+      }
     }
+
+    setPixelData(newPixelData);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -941,6 +957,21 @@ const DrawingCanvas = () => {
       >
         Multi-Layer Perceptron Visualization
       </h1>
+      <div>
+        <div className="text-sm text-[#FF009E] min-w-[250px] mt-1 px-2 text-center">
+          <a 
+            href="https://github.com/cpldcpu/neural-network-visualizer" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="flex items-center justify-center mt-1"
+          >
+            <img 
+              src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" 
+              alt="GitHub Logo" 
+              className="w-4 h-4 mr-1"
+            /> Link to Repository </a>
+        </div>
+      </div>
    
       {errorMessage && (
         <div className="px-4 py-2 bg-red-900/50 border border-red-500 rounded mb-4 text-red-200">
@@ -948,28 +979,57 @@ const DrawingCanvas = () => {
         </div>
       )}
       <div className="flex gap-4 items-start justify-center">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_SIZE}
-          height={CANVAS_SIZE}
-          className="border border-gray-600 cursor-crosshair"
-          onMouseDown={(e) => {
-            setIsDrawing(true);
-            handleMouseMove(e);
-          }}
-          onMouseMove={handleMouseMove}
-          onMouseUp={() => setIsDrawing(false)}
-          onMouseLeave={() => setIsDrawing(false)}
-        />
+        <div className="flex flex-col items-center">
+          <canvas
+            ref={canvasRef}
+            width={CANVAS_SIZE}
+            height={CANVAS_SIZE}
+            className="border border-gray-600 cursor-crosshair"
+            onMouseDown={(e) => {
+              setIsDrawing(true);
+              handleMouseMove(e);
+            }}
+            onMouseMove={handleMouseMove}
+            onMouseUp={() => setIsDrawing(false)}
+            onMouseLeave={() => setIsDrawing(false)}
+          />
+          
+          {/* Canvas Controls Below Canvas */}
+          <div className="flex items-center gap-4 mt-3">
+            
+            <div className="flex items-center gap-3">
+              <label className="text-xs text-gray-300 whitespace-nowrap">Brush size: {brushSize}</label>
+              <Slider
+                value={[brushSize]}
+                onValueChange={([v]) => setBrushSize(Math.max(1, Math.min(10, Math.round(v))))}
+                min={1}
+                max={10}
+                step={1}
+                className="mt-1 w-32"
+              />
+            </div>
+            
+            <label className="text-xs text-gray-300 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={fullIntensity}
+                onChange={() => setFullIntensity(!fullIntensity)}
+              />
+              Full intensity (1.0)
+            </label>
+          </div>
+          <div className="flex items-center gap-4 mt-3">
+            <button
+              onClick={clearCanvas}
+              className="px-4 py-2 bg-gray-800 text-[#00E5FF] border border-[#00E5FF] rounded hover:bg-[#00E5FF22] transition-colors font-medium"
+            >
+              Clear
+            </button>
+            
+          </div>
+        </div>
+        
         <div className="flex flex-col gap-2">
- 
-          <button
-            onClick={clearCanvas}
-            className="mb-1 px-4 py-2 bg-gray-800 text-[#00E5FF] border border-[#00E5FF] rounded hover:bg-[#00E5FF22] transition-colors font-medium"
-          >
-            Clear
-          </button>
-     
           <input
             type="file"
             accept=".json"
@@ -977,13 +1037,7 @@ const DrawingCanvas = () => {
             className="hidden"
             id="weight-upload"
           />
-          <label
-            htmlFor="weight-upload"
-            className="px-4 py-2 bg-gray-800 text-[#FF9E00] border border-[#FF9E00] rounded hover:bg-[#FF9E0022] transition-colors font-medium cursor-pointer text-center"
-          >
-            Load Weights
-          </label>
-          
+
           {/* Quantized Model Input */}
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
@@ -1212,12 +1266,12 @@ const uint32_t L4_weights[] = {
 
           {networkConfig.description && (
             <div className="text-sm text-gray-300 min-w-[250px] mt-2 px-2 text-center">
-              {networkConfig.description.split('\n').map((line, index) => (
-                <Fragment key={index}>
-                  {line}
-                  <br />
-                </Fragment>
-              ))}
+            {networkConfig.description.split('\n').map((line, index) => (
+              <Fragment key={index}>
+                {line}
+                <br />
+              </Fragment>
+            ))}
             </div>
           )}
           
@@ -1230,19 +1284,7 @@ const uint32_t L4_weights[] = {
             <div>Output: {ARCHITECTURE.output} neurons</div>
             <div>Canvas: {canvasSize}×{canvasSize} grid</div>
           </div>
-         <div className="text-sm text-[#FF009E] min-w-[250px] mt-1 px-2 text-center">
-          <a 
-            href="https://github.com/cpldcpu/neural-network-visualizer" 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            className="flex items-center justify-center mt-1"
-          >
-            <img 
-              src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" 
-              alt="GitHub Logo" 
-              className="w-4 h-4 mr-1"
-            /> Link to Repository </a>
-            </div>
+         
         </div>
       </div>
       
