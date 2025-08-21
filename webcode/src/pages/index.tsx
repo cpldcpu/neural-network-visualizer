@@ -5,12 +5,204 @@ import model1 from '../models/model1.json';
 import model2 from '../models/model2.json';
 import model3 from '../models/model3.json';
 
-const ARCHITECTURE = {
+// Dynamic architecture that can be updated based on loaded model
+let ARCHITECTURE = {
   input: 64,
   hidden1: 10,
   hidden2: 10,
+  hidden3: 10, // Added third hidden layer
   output: 4 // Default value
 };
+
+// Types for models used in UI
+type ModelData = { weights: any; classes: string[]; description: string };
+type AvailableModel = { name: string; data: ModelData };
+
+const toModelData = (m: any): ModelData => ({
+  weights: m.weights,
+  classes: Array.isArray(m.classes) ? m.classes.map((c: any) => String(c)) : defaultClassLabels(m.weights?.output?.length || 0),
+  description: m.description || ""
+});
+
+// Parse quantized model from C header file
+const parseQuantizedModel = (headerContent: string) => {
+  try {
+    console.log('Parsing quantized model...');
+    const lines = headerContent.split('\n');
+    const model: any = { layers: [], weights: {} };
+    
+    let currentLayer: any = null;
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // Parse layer definitions
+      if (trimmedLine.startsWith('#define L') && trimmedLine.includes('_active')) {
+        const layerName = trimmedLine.split(' ')[1];
+        currentLayer = { name: layerName, weights: [] };
+        model.layers.push(currentLayer);
+        console.log(`Found layer: ${layerName}`);
+      }
+      
+      // Parse layer properties
+      if (trimmedLine.startsWith('#define L') && trimmedLine.includes('_incoming_weights')) {
+        const match = trimmedLine.match(/_incoming_weights (\d+)/);
+        if (match && currentLayer) {
+          currentLayer.incoming = parseInt(match[1]);
+          console.log(`  Input size: ${currentLayer.incoming}`);
+        }
+      }
+      
+      if (trimmedLine.startsWith('#define L') && trimmedLine.includes('_outgoing_weights')) {
+        const match = trimmedLine.match(/_outgoing_weights (\d+)/);
+        if (match && currentLayer) {
+          currentLayer.outgoing = parseInt(match[1]);
+          console.log(`  Output size: ${currentLayer.outgoing}`);
+        }
+      }
+      
+      if (trimmedLine.startsWith('#define L') && trimmedLine.includes('_bitperweight')) {
+        const match = trimmedLine.match(/_bitperweight (\d+)/);
+        if (match && currentLayer) {
+          currentLayer.bits = parseInt(match[1]);
+          console.log(`  Bits per weight: ${currentLayer.bits}`);
+        }
+      }
+      
+      // Parse weights array
+      if (trimmedLine.startsWith('const uint32_t L') && trimmedLine.includes('_weights[]')) {
+        const layerMatch = trimmedLine.match(/L(\d+)_weights/);
+        if (layerMatch) {
+          const layerIndex = parseInt(layerMatch[1]) - 1;
+          if (model.layers[layerIndex]) {
+            model.layers[layerIndex].weightArrayName = `L${layerIndex + 1}_weights`;
+          }
+        }
+      }
+      
+      // Parse weight values
+      if (trimmedLine.includes('0x') && trimmedLine.includes(',')) {
+        const hexValues = trimmedLine.match(/0x[0-9a-fA-F]+/g);
+        if (hexValues && currentLayer) {
+          currentLayer.weights.push(...hexValues);
+        }
+      }
+    }
+    
+    console.log(`Parsed ${model.layers.length} layers`);
+    
+    // Convert to standard format
+    const standardWeights: any = {};
+    let inputSize = 784; // Default for MNIST
+    
+    for (let i = 0; i < model.layers.length; i++) {
+      const layer = model.layers[i];
+      if (!layer.incoming || !layer.outgoing) {
+        console.warn(`Layer ${i} missing incoming or outgoing weights`);
+        continue;
+      }
+      
+      // Determine layer name based on position and total layers
+      let layerName;
+      if (model.layers.length === 4) {
+        // 3 hidden layers + output
+        layerName = i === 0 ? 'hidden1' : 
+                   i === 1 ? 'hidden2' : 
+                   i === 2 ? 'hidden3' : 'output';
+      } else if (model.layers.length === 3) {
+        // 2 hidden layers + output
+        layerName = i === 0 ? 'hidden1' : 
+                   i === 1 ? 'hidden2' : 'output';
+      } else {
+        // Generic naming for other cases
+        layerName = i === 0 ? 'hidden1' : 
+                   i === 1 ? 'hidden2' : 
+                   i === 2 ? 'hidden3' : `layer${i + 1}`;
+      }
+      
+      console.log(`Processing ${layerName}: ${layer.incoming} -> ${layer.outgoing} (${layer.bits} bits)`);
+      
+      // Extract weights from hex values based on quantization
+      const weights = extractQuantizedWeights(layer.weights, layer.bits, layer.incoming, layer.outgoing);
+      
+      standardWeights[layerName] = weights;
+      
+      if (i === 0) {
+        inputSize = layer.incoming;
+      }
+    }
+    
+    // Determine architecture based on number of layers
+    const numLayers = model.layers.length;
+    const architecture = {
+      input: inputSize,
+      hidden1: model.layers[0]?.outgoing || 16,
+      hidden2: model.layers[1]?.outgoing || 16,
+      hidden3: numLayers === 4 ? (model.layers[2]?.outgoing || 16) : 0, // Only set if 3 hidden layers
+      output: numLayers === 4 ? (model.layers[3]?.outgoing || 10) : (model.layers[2]?.outgoing || 10)
+    };
+    
+    const result = {
+      weights: standardWeights,
+      architecture,
+      classes: defaultClassLabels(architecture.output),
+      description: `Quantized model loaded from C header file (${numLayers} layers)`
+    };
+    
+    console.log('Parsed model:', result);
+    return result;
+  } catch (error) {
+    console.error('Error parsing quantized model:', error);
+    return null;
+  }
+};
+
+// Extract weights from quantized hex values
+const extractQuantizedWeights = (hexWeights: string[], bits: number, incoming: number, outgoing: number): number[][] => {
+  const weights: number[][] = [];
+  
+  // Convert hex strings to binary and extract weights
+  for (let out = 0; out < outgoing; out++) {
+    // console.log("out", out, outgoing, incoming);
+    weights[out] = [];
+    for (let in_ = 0; in_ < incoming; in_++) {
+      // console.log("in_", in_);
+      const weightIndex = Math.floor((out * incoming + in_) / (32 / bits));
+      const bitOffset = (out * incoming + in_) % (32 / bits);
+      
+      if (weightIndex < hexWeights.length) {
+        const hexValue = parseInt(hexWeights[weightIndex], 16);
+        const weight = extractWeightFromBits(hexValue, bitOffset, bits);
+        weights[out][in_] = weight;
+      } else {
+        weights[out][in_] = 0;
+      }
+    }
+  }
+  
+  return weights;
+};
+
+// Extract weight value from bits at specific position
+const extractWeightFromBits = (hexValue: number, bitOffset: number, bits: number): number => {
+  const mask = (1 << bits) - 1;
+  const weight = (hexValue >> (bitOffset * bits)) & mask;
+  
+  // Convert to signed value (assuming symmetric quantization)
+  const maxValue = (1 << (bits - 1)) - 1;
+  if (weight > maxValue) {
+    return weight - (1 << bits);
+  }
+  return weight;
+};
+
+// Update global architecture
+const updateArchitecture = (newArchitecture: any) => {
+  ARCHITECTURE = { ...newArchitecture };
+};
+
+// Default class labels generator: ["0", "1", ..., String(n-1)]
+const defaultClassLabels = (n: number): string[] => Array.from({ length: n }, (_, i) => String(i));
 
 // Helper to multiply matrix and vector
 const matrixVectorProduct = (matrix: number[][], vector: number[]): number[] => {
@@ -40,6 +232,11 @@ const layerNorm = (vector: number[]): number[] => {
 // Center the input pattern
 const centerInputPattern = (input: number[]): number[] => {
   const gridSize = Math.sqrt(input.length);
+  if (!Number.isInteger(gridSize)) {
+    // If not a perfect square, return input as-is
+    return input;
+  }
+  
   const nonZeroIndices = input
     .map((value, index) => (value > 0 ? index : -1))
     .filter(index => index !== -1);
@@ -71,11 +268,22 @@ const centerInputPattern = (input: number[]): number[] => {
 
 // Modify the forwardPass function to accept centerInput as a parameter:
 const forwardPass = (input: number[], weights: any, centerInput: boolean): any => {
-  const processedInput = centerInput ? centerInputPattern(input) : input;
+  // Resize input to match the expected input size
+  let processedInput = input;
+  if (input.length !== ARCHITECTURE.input) {
+    if (input.length < ARCHITECTURE.input) {
+      // Pad with zeros if input is too small
+      processedInput = [...input, ...new Array(ARCHITECTURE.input - input.length).fill(0)];
+    } else {
+      // Truncate if input is too large
+      processedInput = input.slice(0, ARCHITECTURE.input);
+    }
+  }
+  
+  processedInput = centerInput ? centerInputPattern(processedInput) : processedInput;
   
   // First block
   const norm1 = layerNorm(processedInput);
-  // const norm1 = layerNorm(input);
   const linear1 = matrixVectorProduct(weights.hidden1, norm1);
   const act1 = linear1.map(relu);
   
@@ -84,34 +292,39 @@ const forwardPass = (input: number[], weights: any, centerInput: boolean): any =
   const linear2 = matrixVectorProduct(weights.hidden2, norm2);
   const act2 = linear2.map(relu);
   
-  // Output block
-  const norm3 = layerNorm(act2);
-  const output = matrixVectorProduct(weights.output, norm3);
+  let act3, output;
+  
+  // Check if we have a third hidden layer
+  if (weights.hidden3 && ARCHITECTURE.hidden3 > 0) {
+    // Third block (3 hidden layers)
+    const norm3 = layerNorm(act2);
+    const linear3 = matrixVectorProduct(weights.hidden3, norm3);
+    act3 = linear3.map(relu);
+    
+    // Output block
+    const norm4 = layerNorm(act3);
+    output = matrixVectorProduct(weights.output, norm4);
+  } else {
+    // Output block (2 hidden layers)
+    const norm3 = layerNorm(act2);
+    output = matrixVectorProduct(weights.output, norm3);
+  }
 
-  return {
+  const result: any = {
     hidden1: act1,      // Post-ReLU
     hidden2: act2,      // Post-ReLU
     output: output      // Post-Linear (no ReLU)
   };
+  
+  // Only add hidden3 if it exists
+  if (weights.hidden3 && ARCHITECTURE.hidden3 > 0) {
+    result.hidden3 = act3;
+  }
+  
+  return result;
 };
 
-const generateRandomWeights = () => ({
-  hidden1: Array.from({ length: ARCHITECTURE.hidden1 }, () => 
-    Array.from({ length: ARCHITECTURE.input }, () => 
-      (Math.random() * 2 - 1)
-    )
-  ),
-  hidden2: Array.from({ length: ARCHITECTURE.hidden2 }, () => 
-    Array.from({ length: ARCHITECTURE.hidden1 }, () => 
-      (Math.random() * 2 - 1)
-    )
-  ),
-  output: Array.from({ length: ARCHITECTURE.output }, () => 
-    Array.from({ length: ARCHITECTURE.hidden2 }, () => 
-      (Math.random() * 2 - 1)
-    )
-  )
-});
+
 
 const FuelGauge = ({ value, minValue, maxValue, isHighest = false }: { value: number, minValue: number, maxValue: number, isHighest?: boolean }) => {
   const height = 40;
@@ -150,9 +363,12 @@ const FuelGauge = ({ value, minValue, maxValue, isHighest = false }: { value: nu
 const validateWeights = (weights: any): boolean => {
   if (!weights || typeof weights !== 'object') return false;
   
-  // Check structure
+  // Check structure - require at least hidden1, hidden2, and output
   const required = ['hidden1', 'hidden2', 'output'];
   if (!required.every(key => key in weights)) return false;
+  
+  // Check if we have a third hidden layer
+  const hasHidden3 = 'hidden3' in weights && weights.hidden3;
   
   // Check dimensions
   try {
@@ -162,12 +378,24 @@ const validateWeights = (weights: any): boolean => {
     if (weights.hidden2.length !== ARCHITECTURE.hidden2) return false;
     if (weights.hidden2[0].length !== ARCHITECTURE.hidden1) return false;
     
-    if (weights.output.length > 10 || weights.output.length < 1) return false; // Ensure output neurons are between 1 and 10
-    if (weights.output[0].length !== ARCHITECTURE.hidden2) return false;
+    if (hasHidden3) {
+      if (weights.hidden3.length !== ARCHITECTURE.hidden3) return false;
+      if (weights.hidden3[0].length !== ARCHITECTURE.hidden2) return false;
+      
+      if (weights.output.length > 10 || weights.output.length < 1) return false;
+      if (weights.output[0].length !== ARCHITECTURE.hidden3) return false;
+    } else {
+      if (weights.output.length > 10 || weights.output.length < 1) return false;
+      if (weights.output[0].length !== ARCHITECTURE.hidden2) return false;
+    }
     
     // Check if all values are numbers
     const allNumbers = (arr: any[]): boolean => arr.flat().every(x => typeof x === 'number' && !isNaN(x));
     if (!allNumbers(weights.hidden1) || !allNumbers(weights.hidden2) || !allNumbers(weights.output)) {
+      return false;
+    }
+    
+    if (hasHidden3 && !allNumbers(weights.hidden3)) {
       return false;
     }
 
@@ -193,14 +421,19 @@ const NetworkViz = (
 ) => {
   const [weightThreshold, setWeightThreshold] = useState(50);
   const [weights, setWeights] = useState(config.weights);
-  const [classLabels, setClassLabels] = useState(Array(config.weights.output.length).fill("?"));
-  const [layerActivations, setLayerActivations] = useState<{ hidden1: number[], hidden2: number[], output: number[] } | null>(null);
+  const [classLabels, setClassLabels] = useState(config.classes || defaultClassLabels(config.weights.output.length));
+  const [layerActivations, setLayerActivations] = useState<{ hidden1: number[], hidden2: number[], hidden3?: number[], output: number[] } | null>(null);
 
   // Update weights and class labels when config changes
   useEffect(() => {
     setWeights(config.weights);
-    setClassLabels(config.classes || Array(config.weights.output.length).fill("?"));
+    setClassLabels(config.classes || defaultClassLabels(config.weights.output.length));
   }, [config]);
+  
+  // Update architecture when it changes
+  useEffect(() => {
+    // This will trigger a re-render with the new architecture
+  }, [ARCHITECTURE]);
   
   useEffect(() => {
     if (activations) {
@@ -230,7 +463,21 @@ const NetworkViz = (
   };
 
   const renderConnections = () => {
-    const layers = [ARCHITECTURE.input, ARCHITECTURE.hidden1, ARCHITECTURE.hidden2, weights.output.length];
+    // Get current architecture dynamically
+    const currentArchitecture = {
+      input: ARCHITECTURE.input,
+      hidden1: weights?.hidden1?.length || ARCHITECTURE.hidden1,
+      hidden2: weights?.hidden2?.length || ARCHITECTURE.hidden2,
+      hidden3: weights?.hidden3?.length || ARCHITECTURE.hidden3, // Added hidden3
+      output: weights?.output?.length || ARCHITECTURE.output
+    };
+    
+    // Determine layers based on whether hidden3 exists
+    const hasHidden3 = weights?.hidden3 && currentArchitecture.hidden3 > 0;
+    const layers = hasHidden3 
+      ? [currentArchitecture.input, currentArchitecture.hidden1, currentArchitecture.hidden2, currentArchitecture.hidden3, currentArchitecture.output]
+      : [currentArchitecture.input, currentArchitecture.hidden1, currentArchitecture.hidden2, currentArchitecture.output];
+    
     const allPositions = layers.map((size, i) => getLayerPositions(size, i, layers.length));
     const connections: JSX.Element[] = [];
     let connectionId = 0;
@@ -239,9 +486,11 @@ const NetworkViz = (
     const getLayerActivations = (layerIndex: number): number[] => {
       if (!layerActivations) return new Array(layers[layerIndex]).fill(0);
       switch(layerIndex) {
-        case 0: return centerInput ? centerInputPattern(activations || new Array(64).fill(0)) : (activations || new Array(64).fill(0));
+        case 0: return centerInput ? centerInputPattern(activations || new Array(ARCHITECTURE.input).fill(0)) : (activations || new Array(ARCHITECTURE.input).fill(0));
         case 1: return layerActivations.hidden1;
         case 2: return layerActivations.hidden2;
+        case 3: return hasHidden3 ? (layerActivations.hidden3 || []) : layerActivations.output;
+        case 4: return hasHidden3 ? layerActivations.output : [];
         default: return [];
       }
     };
@@ -295,14 +544,34 @@ const NetworkViz = (
     if (weights) {
       drawLayerConnections(allPositions[0], allPositions[1], weights.hidden1, 0);
       drawLayerConnections(allPositions[1], allPositions[2], weights.hidden2, 1);
-      drawLayerConnections(allPositions[2], allPositions[3], weights.output, 2);
+      
+      if (hasHidden3) {
+        drawLayerConnections(allPositions[2], allPositions[3], weights.hidden3, 2);
+        drawLayerConnections(allPositions[3], allPositions[4], weights.output, 3);
+      } else {
+        drawLayerConnections(allPositions[2], allPositions[3], weights.output, 2);
+      }
     }
 
     return connections;
   };
 
   const renderNeurons = () => {
-    const layers = [ARCHITECTURE.input, ARCHITECTURE.hidden1, ARCHITECTURE.hidden2, weights.output.length];
+    // Get current architecture dynamically
+    const currentArchitecture = {
+      input: ARCHITECTURE.input,
+      hidden1: weights?.hidden1?.length || ARCHITECTURE.hidden1,
+      hidden2: weights?.hidden2?.length || ARCHITECTURE.hidden2,
+      hidden3: weights?.hidden3?.length || ARCHITECTURE.hidden3, // Added hidden3
+      output: weights?.output?.length || ARCHITECTURE.output
+    };
+    
+    // Determine layers based on whether hidden3 exists
+    const hasHidden3 = weights?.hidden3 && currentArchitecture.hidden3 > 0;
+    const layers = hasHidden3 
+      ? [currentArchitecture.input, currentArchitecture.hidden1, currentArchitecture.hidden2, currentArchitecture.hidden3, currentArchitecture.output]
+      : [currentArchitecture.input, currentArchitecture.hidden1, currentArchitecture.hidden2, currentArchitecture.output];
+    
     const neurons: JSX.Element[] = [];
     let neuronId = 0;
 
@@ -312,15 +581,17 @@ const NetworkViz = (
         // Get activation value for this neuron
         let activation = 0;
         if (layerIndex === 0) {
-          activation = centerInput ? centerInputPattern(activations || new Array(64).fill(0))[i] : (activations || new Array(64).fill(0))[i];
+          activation = centerInput ? centerInputPattern(activations || new Array(ARCHITECTURE.input).fill(0))[i] : (activations || new Array(ARCHITECTURE.input).fill(0))[i];
         } else if (layerActivations) {
           const layerName = layerIndex === 1 ? 'hidden1' : 
-                           layerIndex === 2 ? 'hidden2' : 'output';
-          activation = layerActivations[layerName][i] || 0;
+                           layerIndex === 2 ? 'hidden2' : 
+                           layerIndex === 3 ? (hasHidden3 ? 'hidden3' : 'output') : 'output';
+          activation = layerActivations[layerName]?.[i] || 0;
         }
 
         // For output layer, determine if this is the highest activation
-        const isHighestOutput = layerIndex === 3 && layerActivations?.output && 
+        const isOutputLayer = hasHidden3 ? layerIndex === 4 : layerIndex === 3;
+        const isHighestOutput = isOutputLayer && layerActivations?.output && 
           activation === Math.max(...layerActivations.output);
 
         // Draw neuron
@@ -351,7 +622,7 @@ const NetworkViz = (
               <foreignObject
                 x={pos.x + 8}
                 y={pos.y - 20}
-                width={layerIndex === 3 ? 50 : 12}
+                width={isOutputLayer ? 50 : 12}
                 height={40}
                 className="flex items-center"
               >
@@ -362,17 +633,19 @@ const NetworkViz = (
                       !layerActivations ? 0 : Math.min(...(
                         layerIndex === 1 ? layerActivations.hidden1 :
                         layerIndex === 2 ? layerActivations.hidden2 :
+                        layerIndex === 3 ? (hasHidden3 ? (layerActivations.hidden3 || []) : layerActivations.output) :
                         layerActivations.output
                       ))}
                     maxValue={layerIndex === 0 ? 1 : 
                       !layerActivations ? 1 : Math.max(...(
                         layerIndex === 1 ? layerActivations.hidden1 :
                         layerIndex === 2 ? layerActivations.hidden2 :
+                        layerIndex === 3 ? (hasHidden3 ? (layerActivations.hidden3 || []) : layerActivations.output) :
                         layerActivations.output
                       ))}
                     isHighest={isHighestOutput}
                   />
-                  {layerIndex === 3 && (
+                  {isOutputLayer && (
                     <span className="text-xs text-white ml-1 font-bold">
                       {classLabels[i]}
                     </span>
@@ -450,18 +723,42 @@ const DrawingCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [pixelData, setPixelData] = useState(new Array(64).fill(0));
+  const [canvasSize, setCanvasSize] = useState(8); // Grid size for canvas
+  
+  // Update canvas size when architecture changes
+  useEffect(() => {
+    const inputSize = ARCHITECTURE.input;
+    if (inputSize === 784) {
+      setCanvasSize(28); // MNIST size
+      setPixelData(new Array(784).fill(0));
+    } else if (inputSize === 64) {
+      setCanvasSize(8); // Default size
+      setPixelData(new Array(64).fill(0));
+    } else {
+      // For other sizes, try to find a square root
+      const sqrt = Math.sqrt(inputSize);
+      if (Number.isInteger(sqrt)) {
+        setCanvasSize(sqrt);
+        setPixelData(new Array(inputSize).fill(0));
+      } else {
+        // Fallback to 8x8 for non-square inputs
+        setCanvasSize(8);
+        setPixelData(new Array(64).fill(0));
+      }
+    }
+  }, [ARCHITECTURE.input]);
   
   // Convert AVAILABLE_MODELS to a state variable
-  const [availableModels, setAvailableModels] = useState([
-    { name: 'Default Model', data: defaultModel },
-    { name: 'Model 1', data: model1 },
-    { name: 'Model 2', data: model2 },
-    { name: 'Model 3', data: model3 }
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([
+    { name: 'Default Model', data: toModelData(defaultModel) },
+    { name: 'Model 1', data: toModelData(model1) },
+    { name: 'Model 2', data: toModelData(model2) },
+    { name: 'Model 3', data: toModelData(model3) }
   ]);
 
-  const [networkConfig, setNetworkConfig] = useState({
+  const [networkConfig, setNetworkConfig] = useState<ModelData>({
     weights: defaultModel.weights,
-    classes: defaultModel.classes || Array(defaultModel.weights.output.length).fill("?"),
+    classes: Array.isArray(defaultModel.classes) ? defaultModel.classes.map((c: any) => String(c)) : defaultClassLabels(defaultModel.weights.output.length),
     description: defaultModel.description || ""
   });
   
@@ -469,7 +766,7 @@ const DrawingCanvas = () => {
   const [centerInput, setCenterInput] = useState(true);
   const [selectedModel, setSelectedModel] = useState('Default Model');
   const CANVAS_SIZE = 256;
-  const GRID_SIZE = 8;
+  const GRID_SIZE = canvasSize;
   const PIXEL_SIZE = CANVAS_SIZE / GRID_SIZE;
 
   // Handle weight upload and add "Custom Model" to the selection list
@@ -500,7 +797,7 @@ const DrawingCanvas = () => {
         if (!validateWeights(weights)) {
           setErrorMessage(
             "Invalid weight format. Expected dimensions: " +
-            `Input→Hidden1: 64×10, Hidden1→Hidden2: 10×10, Hidden2→Output: 10×4`
+            `Input→Hidden1: 64×10, Hidden1→Hidden2: 10×10, Hidden2→Hidden3: 10×10, Hidden3→Output: 10×4`
           );
           return;
         }
@@ -510,20 +807,20 @@ const DrawingCanvas = () => {
 
         setNetworkConfig({
           weights,
-          classes: validClasses ? classes : Array(weights.output.length).fill("?"),
+          classes: validClasses ? classes.map((c: any) => String(c)) : defaultClassLabels(weights.output.length),
           description: description || ""
         });
 
         // Add "Custom Model" to availableModels if not already present
-        setAvailableModels((prevModels) => {
+        setAvailableModels((prevModels: AvailableModel[]) => {
           // Check if "Custom Model" already exists
           const customModelExists = prevModels.some(model => model.name === 'Custom Model');
           if (!customModelExists) {
-            return [...prevModels, { name: 'Custom Model', data: { weights, classes, description } }];
+            return [...prevModels, { name: 'Custom Model', data: { weights, classes: validClasses ? classes.map((c: any) => String(c)) : defaultClassLabels(weights.output.length), description: description || "" } }];
           } else {
             // Update the existing "Custom Model" with new data
             return prevModels.map(model => 
-              model.name === 'Custom Model' ? { name: 'Custom Model', data: { weights, classes, description } } : model
+              model.name === 'Custom Model' ? { name: 'Custom Model', data: { weights, classes: validClasses ? classes.map((c: any) => String(c)) : defaultClassLabels(weights.output.length), description: description || "" } } : model
             );
           }
         });
@@ -547,7 +844,7 @@ const DrawingCanvas = () => {
     if (selected) {
       setNetworkConfig({
         weights: selected.data.weights,
-        classes: selected.data.classes || Array(selected.data.weights.output.length).fill("?"),
+        classes: selected.data.classes || defaultClassLabels(selected.data.weights.output.length),
         description: selected.data.description || ""
       });
     }
@@ -559,20 +856,22 @@ const DrawingCanvas = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    ctx.fillStyle = '#1A1A1A';
-    ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    // Type assertion to satisfy TypeScript
+    const context = ctx as CanvasRenderingContext2D;
+    context.fillStyle = '#1A1A1A';
+    context.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
     
-    ctx.strokeStyle = '#333333';
+    context.strokeStyle = '#333333';
     for (let i = 1; i < GRID_SIZE; i++) {
       const pos = i * PIXEL_SIZE;
-      ctx.beginPath();
-      ctx.moveTo(pos, 0);
-      ctx.lineTo(pos, CANVAS_SIZE);
-      ctx.moveTo(0, pos);
-      ctx.lineTo(CANVAS_SIZE, pos);
-      ctx.stroke();
+      context.beginPath();
+      context.moveTo(pos, 0);
+      context.lineTo(pos, CANVAS_SIZE);
+      context.moveTo(0, pos);
+      context.lineTo(CANVAS_SIZE, pos);
+      context.stroke();
     }
-  }, []);
+  }, [GRID_SIZE, PIXEL_SIZE]);
 
   const updatePixelData = (ctx: CanvasRenderingContext2D, x: number, y: number, intensity: number) => {
     const gridX = Math.floor(x / PIXEL_SIZE);
@@ -610,17 +909,20 @@ const DrawingCanvas = () => {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = '#1A1A1A';
-    ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
     
-    ctx.strokeStyle = '#333333';
+    // Type assertion to satisfy TypeScript
+    const context = ctx as CanvasRenderingContext2D;
+    context.fillStyle = '#1A1A1A';
+    context.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    
+    context.strokeStyle = '#333333';
     for (let i = 0; i < GRID_SIZE; i++) {
       for (let j = 0; j < GRID_SIZE; j++) {
-        ctx.strokeRect(i * PIXEL_SIZE, j * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+        context.strokeRect(i * PIXEL_SIZE, j * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
       }
     }
     
-    setPixelData(new Array(64).fill(0));
+    setPixelData(new Array(ARCHITECTURE.input).fill(0));
   };
 
   return (
@@ -681,7 +983,206 @@ const DrawingCanvas = () => {
           >
             Load Weights
           </label>
-          <style jsx>{`
+          
+          {/* Quantized Model Input */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm text-gray-300">Paste Quantized Model (C Header):</label>
+              <button
+                onClick={() => {
+                  const textarea = document.getElementById('quantized-model-input') as HTMLTextAreaElement;
+                  if (textarea) {
+                    textarea.value = '';
+                    setErrorMessage("");
+                  }
+                }}
+                className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700"
+              >
+                Clear
+              </button>
+            </div>
+            <textarea
+              id="quantized-model-input"
+              placeholder="Paste your quantized model C header file content here..."
+              className="w-full h-32 px-3 py-2 bg-gray-800 text-gray-200 border border-gray-600 rounded text-xs font-mono resize-none"
+              onChange={(e) => {
+                const content = e.target.value;
+                if (content.trim()) {
+                  try {
+                    const parsedModel = parseQuantizedModel(content);
+                    if (parsedModel && parsedModel.weights && 
+                        parsedModel.weights.hidden1 && 
+                        parsedModel.weights.hidden2 && 
+                        parsedModel.weights.output) {
+                      
+                      // Update architecture
+                      updateArchitecture(parsedModel.architecture);
+                      
+                      // Update network config
+                      setNetworkConfig({
+                        weights: parsedModel.weights,
+                        classes: parsedModel.classes,
+                        description: parsedModel.description
+                      });
+                      
+                      // Add to available models
+                      setAvailableModels((prevModels: AvailableModel[]) => {
+                        const customModelExists = prevModels.some(model => model.name === 'Quantized Model');
+                        if (!customModelExists) {
+                          return [...prevModels, { name: 'Quantized Model', data: parsedModel }];
+                        } else {
+                          return prevModels.map(model => 
+                            model.name === 'Quantized Model' ? { name: 'Quantized Model', data: parsedModel } : model
+                          );
+                        }
+                      });
+                      
+                      setSelectedModel('Quantized Model');
+                      setErrorMessage("");
+                    } else {
+                      setErrorMessage("Invalid model structure. Expected hidden1, hidden2, and output layers (hidden3 is optional).");
+                    }
+                  } catch (error) {
+                    console.error('Error parsing model:', error);
+                    setErrorMessage("Failed to parse quantized model. Please check the format.");
+                  }
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                const sampleModel = `// Automatically generated header file
+// Date: 2024-09-05 14:15:11.804110
+// Quantized model exported from opt_Cosine_lr0.001_Aug_BitMnist_PerTensor_4bitsym_RMS_width16_16_0_bs128_epochs60.pth
+// Generated by exportquant.py
+
+#include <stdint.h>
+
+#ifndef BITNETMCU_MODEL_H
+#define BITNETMCU_MODEL_H
+
+// Number of layers
+#define NUM_LAYERS 3
+
+// Maximum number of activations per layer
+#define MAX_N_ACTIVATIONS 16
+
+// Layer: L1
+// QuantType: 4bitsym
+#define L1_active
+#define L1_bitperweight 4
+#define L1_incoming_weights 784
+#define L1_outgoing_weights 16
+const uint32_t L1_weights[] = {
+	0x11101121,0x109abccb,0xa9800111,0x10111101,0x121218ac,0xbca8a908,0x80000011,0x12122224,
+	0x19dfc900,0x80008000,0x00811012,0x24431bff,0xfaa09000,0x81800001,0x10223431,0xaffffa88
+};
+
+// Layer: L2
+// QuantType: 4bitsym
+#define L2_active
+#define L2_bitperweight 4
+#define L2_incoming_weights 16
+#define L2_outgoing_weights 16
+const uint32_t L2_weights[] = {
+	0x8110e2a1,0x1aa390f1,0x05cb0482,0x20800981,0x162013b8,0x804828b2,0x1b910933,0x200b518b
+};
+
+// Layer: L3
+// QuantType: 4bitsym
+#define L3_active
+#define L3_bitperweight 4
+#define L3_incoming_weights 16
+#define L3_outgoing_weights 10
+const uint32_t L3_weights[] = {
+	0x9abbb84b,0xc92880bb,0xb1b28ca0,0x08828906,0x0b821919,0xaaa8993a,0xb38a1c8a,0x9912a028
+};
+
+#endif`;
+                const textarea = document.getElementById('quantized-model-input') as HTMLTextAreaElement;
+                if (textarea) {
+                  textarea.value = sampleModel;
+                  // Trigger the onChange event
+                  const event = new Event('input', { bubbles: true });
+                  textarea.dispatchEvent(event);
+                }
+              }}
+              className="mt-2 w-full px-3 py-2 bg-gray-700 text-gray-300 border border-gray-600 rounded text-xs hover:bg-gray-600 transition-colors"
+            >
+              Load Sample MNIST Model
+            </button>
+            <button
+              onClick={() => {
+                const sampleModel3Hidden = `// Sample 3-hidden-layer model
+// This demonstrates the 3 hidden layer functionality
+
+#include <stdint.h>
+
+#ifndef BITNETMCU_MODEL_H
+#define BITNETMCU_MODEL_H
+
+// Number of layers
+#define NUM_LAYERS 4
+
+// Maximum number of activations per layer
+#define MAX_N_ACTIVATIONS 16
+
+// Layer: L1 (Input -> Hidden1)
+// QuantType: 4bitsym
+#define L1_active
+#define L1_bitperweight 4
+#define L1_incoming_weights 784
+#define L1_outgoing_weights 16
+const uint32_t L1_weights[] = {
+	0x11101121,0x109abccb,0xa9800111,0x10111101,0x121218ac,0xbca8a908,0x80000011,0x12122224,
+	0x19dfc900,0x80008000,0x00811012,0x24431bff,0xfaa09000,0x81800001,0x10223431,0xaffffa88
+};
+
+// Layer: L2 (Hidden1 -> Hidden2)
+// QuantType: 4bitsym
+#define L2_active
+#define L2_bitperweight 4
+#define L2_incoming_weights 16
+#define L2_outgoing_weights 16
+const uint32_t L2_weights[] = {
+	0x8110e2a1,0x1aa390f1,0x05cb0482,0x20800981,0x162013b8,0x804828b2,0x1b910933,0x200b518b
+};
+
+// Layer: L3 (Hidden2 -> Hidden3)
+// QuantType: 4bitsym
+#define L3_active
+#define L3_bitperweight 4
+#define L3_incoming_weights 16
+#define L3_outgoing_weights 16
+const uint32_t L3_weights[] = {
+	0x9abbb84b,0xc92880bb,0xb1b28ca0,0x08828906,0x0b821919,0xaaa8993a,0xb38a1c8a,0x9912a028
+};
+
+// Layer: L4 (Hidden3 -> Output)
+// QuantType: 4bitsym
+#define L4_active
+#define L4_bitperweight 4
+#define L4_incoming_weights 16
+#define L4_outgoing_weights 10
+const uint32_t L4_weights[] = {
+	0x12345678,0x9abcdef0,0x11111111,0x22222222,0x33333333,0x44444444,0x55555555,0x66666666
+};
+
+#endif`;
+                const textarea = document.getElementById('quantized-model-input') as HTMLTextAreaElement;
+                if (textarea) {
+                  textarea.value = sampleModel3Hidden;
+                  // Trigger the onChange event
+                  const event = new Event('input', { bubbles: true });
+                  textarea.dispatchEvent(event);
+                }
+              }}
+              className="mt-2 w-full px-3 py-2 bg-gray-700 text-gray-300 border border-gray-600 rounded text-xs hover:bg-gray-600 transition-colors"
+            >
+              Load Sample 3-Hidden-Layer Model
+            </button>
+          </div>
+          <style>{`
           select.custom-dropdown {
             text-align: center; /* Center the text */
             text-align-last: center; /* Center the selected text */
@@ -710,17 +1211,25 @@ const DrawingCanvas = () => {
 
 
           {networkConfig.description && (
-
             <div className="text-sm text-gray-300 min-w-[250px] mt-2 px-2 text-center">
-            {networkConfig.description.split('\n').map((line, index) => (
-              <Fragment key={index}>
-                {line}
-                <br />
-              </Fragment>
-            ))}
+              {networkConfig.description.split('\n').map((line, index) => (
+                <Fragment key={index}>
+                  {line}
+                  <br />
+                </Fragment>
+              ))}
             </div>
-
           )}
+          
+          {/* Architecture Info */}
+          <div className="text-xs text-gray-400 min-w-[250px] mt-2 px-2 text-center">
+            <div>Input: {ARCHITECTURE.input} neurons</div>
+            <div>Hidden1: {ARCHITECTURE.hidden1} neurons</div>
+            <div>Hidden2: {ARCHITECTURE.hidden2} neurons</div>
+            {ARCHITECTURE.hidden3 > 0 && <div>Hidden3: {ARCHITECTURE.hidden3} neurons</div>}
+            <div>Output: {ARCHITECTURE.output} neurons</div>
+            <div>Canvas: {canvasSize}×{canvasSize} grid</div>
+          </div>
          <div className="text-sm text-[#FF009E] min-w-[250px] mt-1 px-2 text-center">
           <a 
             href="https://github.com/cpldcpu/neural-network-visualizer" 
